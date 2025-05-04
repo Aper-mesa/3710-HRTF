@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.5.4)  4 MAY 2025 17:02
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.5.4)  4 MAY 2025 20:12
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -81,7 +81,7 @@ File: l3backend-pdftex.def 2024-05-08 L3 backend support: PDF output (pdfTeX)
 \l__color_backend_stack_int=\count274
 \l__pdf_internal_box=\box54
 )
-No file main.aux.
+(/Users/nihao/Documents/GitHub/3710-HRTF/out/main.aux)
 \openout1 = `main.aux'.
 
 LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 4.
@@ -98,6 +98,7 @@ LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 4.
 LaTeX Font Info:    ... okay on input line 4.
 LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 4.
 LaTeX Font Info:    ... okay on input line 4.
+
 
 ./main.tex:4: LaTeX Error: The font size command \normalsize is not defined:
                there is probably something wrong with the class file.
@@ -145,10 +146,10 @@ L3 programming layer <2025-01-18>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 944 strings out of 473190
- 15339 string characters out of 5715801
+ 947 strings out of 473190
+ 15464 string characters out of 5715801
  403670 words of memory out of 5000000
- 24266 multiletter control sequences out of 15000+600000
+ 24267 multiletter control sequences out of 15000+600000
  559005 words of font info for 37 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  56i,5n,65p,200b,82s stack positions out of 10000i,1000n,20000p,200000b,200000s
