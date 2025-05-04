@@ -22,7 +22,7 @@ def load_hrtf_fft_binaural(directory):
                 print(f"Error reading {fname}: {e}")
     return np.array(left_list), np.array(right_list)
 
-def get_significant_regions(freqs, p_values, threshold=0.05):
+def get_significant_regions(freqs, p_values, threshold=0.05, min_width=300):
     regions = []
     in_region = False
     start = 0
@@ -32,8 +32,9 @@ def get_significant_regions(freqs, p_values, threshold=0.05):
             start = i
         elif p >= threshold and in_region:
             in_region = False
-            regions.append((freqs[start], freqs[i-1]))
-    if in_region:
+            if freqs[i-1] - freqs[start] > min_width:
+                regions.append((freqs[start], freqs[i-1]))
+    if in_region and freqs[-1] - freqs[start] > min_width:
         regions.append((freqs[start], freqs[-1]))
     return regions
 
@@ -50,35 +51,69 @@ n = female_left.shape[1]
 fs = 44100
 freqs = np.fft.rfftfreq(n * 2 - 1, d=1/fs)
 
-# 获取显著频段
-regions_left = get_significant_regions(freqs, p_left)
-regions_right = get_significant_regions(freqs, p_right)
+# 拆分低频/高频
+low_mask = freqs <= 20000
+high_mask = freqs > 20000
+freqs_low = freqs[low_mask]
+freqs_high = freqs[high_mask]
+p_left_low = p_left[low_mask]
+p_right_low = p_right[low_mask]
+p_left_high = p_left[high_mask]
+p_right_high = p_right[high_mask]
 
-# 绘图
+# 显著频段
+regions_left_low = get_significant_regions(freqs_low, p_left_low)
+regions_right_low = get_significant_regions(freqs_low, p_right_low)
+regions_left_high = get_significant_regions(freqs_high, p_left_high)
+regions_right_high = get_significant_regions(freqs_high, p_right_high)
+
+# ----------- 主图：0–20kHz ----------
 plt.figure(figsize=(12, 6))
-plt.plot(freqs, p_left, label="Left Ear p-value", color="blue")
-plt.plot(freqs, p_right, label="Right Ear p-value", color="orange")
+plt.plot(freqs_low, p_left_low, label="Left Ear p-value", color="blue")
+plt.plot(freqs_low, p_right_low, label="Right Ear p-value", color="orange")
 plt.axhline(0.05, color='red', linestyle='--', label="p=0.05")
 
-# 标注显著区域 + 频率值
-for start, end in regions_left:
+top = 10  # 用于标注高度（log scale）
+for start, end in regions_left_low:
+    mid = (start + end) / 2
     plt.axvspan(start, end, color='blue', alpha=0.2)
-    mid = (start + end) / 2
-    label = f"{int(start)}–{int(end)}Hz"
-    plt.text(mid, 1.5, label, color='blue',
-             rotation=0, ha='center', va='bottom', fontsize=8)
+    plt.text(mid, top, f"{int(start)}–{int(end)}Hz", color='blue', ha='center', va='top', fontsize=9)
 
-for start, end in regions_right:
-    plt.axvspan(start, end, color='orange', alpha=0.2)
+for start, end in regions_right_low:
     mid = (start + end) / 2
-    label = f"{int(start)}–{int(end)}Hz"
-    plt.text(mid, 1.1, label, color='orange',
-             rotation=0, ha='center', va='bottom', fontsize=8)
+    plt.axvspan(start, end, color='orange', alpha=0.2)
+    plt.text(mid, top / 2, f"{int(start)}–{int(end)}Hz", color='orange', ha='center', va='top', fontsize=9)
 
 plt.yscale('log')
 plt.xlabel("Frequency (Hz)")
 plt.ylabel("p-value (log scale)")
-plt.title("Welch's t-test on HRTF: Male vs Female")
+plt.title("Welch's t-test on HRTF: Male vs Female (≤20kHz)")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# ----------- 高频图：>20kHz ----------
+plt.figure(figsize=(10, 5))
+plt.plot(freqs_high, p_left_high, label="Left Ear p-value", color="blue")
+plt.plot(freqs_high, p_right_high, label="Right Ear p-value", color="orange")
+plt.axhline(0.05, color='red', linestyle='--', label="p=0.05")
+
+top = 10  # 用于高频图标注位置
+for start, end in regions_left_high:
+    mid = (start + end) / 2
+    plt.axvspan(start, end, color='blue', alpha=0.2)
+    plt.text(mid, top, f"{int(start)}–{int(end)}Hz", color='blue', ha='center', va='top', fontsize=9)
+
+for start, end in regions_right_high:
+    mid = (start + end) / 2
+    plt.axvspan(start, end, color='orange', alpha=0.2)
+    plt.text(mid, top / 2, f"{int(start)}–{int(end)}Hz", color='orange', ha='center', va='top', fontsize=9)
+
+plt.yscale('log')
+plt.xlabel("Frequency (Hz)")
+plt.ylabel("p-value (log scale)")
+plt.title("Welch's t-test on HRTF: Male vs Female (>20kHz)")
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
