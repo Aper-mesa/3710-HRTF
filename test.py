@@ -1,40 +1,53 @@
 import os
-import pysofa2 as sofa
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import ttest_ind
+import sofar as sf
 
-# 设定路径
-hrtf_path = './hrtf/'
+def load_hrtf_fft_binaural(directory):
+    left_list = []
+    right_list = []
+    for fname in os.listdir(directory):
+        if fname.endswith(".sofa"):
+            try:
+                sofa = sf.read_sofa(os.path.join(directory, fname), verify=False)
+                ir = sofa.Data_IR  # (M, R, N)
+                pos = sofa.SourcePosition  # (M, 3)
 
-# 找到第一个 .sofa 文件
-sofa_files = [f for f in os.listdir(hrtf_path) if f.endswith('.sofa')]
+                # 找到最接近前方 (0,0,1)
+                idx = np.argmin(np.linalg.norm(pos - np.array([0, 0, 1]), axis=1))
 
-if not sofa_files:
-    print("No SOFA files found in the directory.")
-else:
-    sofa_file_path = os.path.join(hrtf_path, sofa_files[0])
-    print(f"Loading SOFA file: {sofa_file_path}")
+                left_fft = np.abs(np.fft.rfft(ir[idx, 0, :]))
+                right_fft = np.abs(np.fft.rfft(ir[idx, 1, :]))
+                left_list.append(left_fft)
+                right_list.append(right_fft)
+            except Exception as e:
+                print(f"Error reading {fname}: {e}")
+    return np.array(left_list), np.array(right_list)
 
-    # 用 pysofa2 正确打开
-    sofa_data = sofa.open(sofa_file_path)
+# 实际数据读取
+female_left, female_right = load_hrtf_fft_binaural('./female')
+male_left, male_right = load_hrtf_fft_binaural('./male')
 
-    # 打印基础信息
-    print("\n--- Basic SOFA Information ---")
-    # Global attributes
-    print(f"Title        : {sofa_data.get('GLOBAL_Title', 'N/A')}")
-    print(f"Author       : {sofa_data.get('GLOBAL_Author', 'N/A')}")
-    print(f"Organization : {sofa_data.get('GLOBAL_Organization', 'N/A')}")
-    print(f"Comment      : {sofa_data.get('GLOBAL_Comment', 'N/A')}")
-    print(f"Version      : {sofa_data.get('GLOBAL_Version', 'N/A')}")
+# Welch's t-test
+t_left, p_left = ttest_ind(male_left, female_left, axis=0, equal_var=False)
+t_right, p_right = ttest_ind(male_right, female_right, axis=0, equal_var=False)
 
-    # Sampling rate
-    if 'Data_SamplingRate' in sofa_data:
-        print(f"Sampling Rate: {sofa_data['Data_SamplingRate'][0]} Hz")
-    else:
-        print("Sampling Rate: N/A")
+# 频率轴
+n = female_left.shape[1]
+fs = 44100
+freqs = np.fft.rfftfreq(n * 2 - 1, d=1/fs)
 
-    # Data dimensions
-    print("\n--- Data Shapes ---")
-    for key in ['ListenerPosition', 'ReceiverPosition', 'SourcePosition', 'Data_IR', 'Data_SamplingRate']:
-        if key in sofa_data:
-            print(f"{key:20}: {sofa_data[key].shape}")
-        else:
-            print(f"{key:20}: Not available")
+# 可视化
+plt.figure(figsize=(10, 5))
+plt.plot(freqs, p_left, label="Left Ear p-value")
+plt.plot(freqs, p_right, label="Right Ear p-value")
+plt.axhline(0.05, color='red', linestyle='--', label="p=0.05")
+plt.yscale('log')
+plt.xlabel("Frequency (Hz)")
+plt.ylabel("p-value (log scale)")
+plt.title("Welch's t-test on HRTF: Male vs Female")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
