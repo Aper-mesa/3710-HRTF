@@ -1,14 +1,24 @@
-import os
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from scipy.stats import ttest_ind
-from scipy.interpolate import interp1d
 import sofar as sf
+from scipy.interpolate import interp1d
+from scipy.stats import ttest_ind
 
 # ====== 读取 HRTF 并做 FFT ======
-def load_hrtf_fft_binaural(directory):
-    left_list, right_list = [], []
+def load_fft_four_directions_avg(directory):
+    import os
+
+    left_all, right_all = [], []
+
+    # 四个目标方向：前、后、左、右
+    targets = [
+        np.array([0, 0, 1]),  # front
+        np.array([180, 0, -1]),  # back
+        np.array([-90, 0, 0]),  # left
+        np.array([90, 0, 0])  # right
+    ]
+
     for fname in os.listdir(directory):
         if not fname.endswith(".sofa"):
             continue
@@ -16,14 +26,25 @@ def load_hrtf_fft_binaural(directory):
             sofa = sf.read_sofa(os.path.join(directory, fname), verify=False)
             ir = sofa.Data_IR
             pos = sofa.SourcePosition
-            idx = np.argmin(np.linalg.norm(pos - np.array([0, 0, 1]), axis=1))
-            left = np.abs(np.fft.rfft(ir[idx, 0, :]))
-            right = np.abs(np.fft.rfft(ir[idx, 1, :]))
-            left_list.append(left)
-            right_list.append(right)
+
+            left_dir = []
+            right_dir = []
+
+            for target in targets:
+                idx = np.argmin(np.linalg.norm(pos - target, axis=1))
+                left_fft = np.abs(np.fft.rfft(ir[idx, 0, :]))
+                right_fft = np.abs(np.fft.rfft(ir[idx, 1, :]))
+                left_dir.append(left_fft)
+                right_dir.append(right_fft)
+
+            left_all.append(np.mean(left_dir, axis=0))
+            right_all.append(np.mean(right_dir, axis=0))
+
         except Exception as e:
             print(f"Error reading {fname}: {e}")
-    return np.array(left_list), np.array(right_list)
+
+    return np.array(left_all), np.array(right_all)
+
 
 # ====== 提取显著区域（p < 0.05，log空间插值）======
 def extract_regions_logspace(freqs, p_vals, threshold=0.05, resolution=10000):
@@ -41,15 +62,18 @@ def extract_regions_logspace(freqs, p_vals, threshold=0.05, resolution=10000):
             start_f = f_interp[0]
             in_region = True
         elif below[i] and not below[i - 1]:
-            start_f = f_interp[i - 1] + (np.log10(threshold) - log_vals_interp[i - 1]) * (f_interp[i] - f_interp[i - 1]) / (log_vals_interp[i] - log_vals_interp[i - 1])
+            start_f = f_interp[i - 1] + (np.log10(threshold) - log_vals_interp[i - 1]) * (
+                        f_interp[i] - f_interp[i - 1]) / (log_vals_interp[i] - log_vals_interp[i - 1])
             in_region = True
         elif not below[i] and below[i - 1] and in_region:
-            end_f = f_interp[i - 1] + (np.log10(threshold) - log_vals_interp[i - 1]) * (f_interp[i] - f_interp[i - 1]) / (log_vals_interp[i] - log_vals_interp[i - 1])
+            end_f = f_interp[i - 1] + (np.log10(threshold) - log_vals_interp[i - 1]) * (
+                        f_interp[i] - f_interp[i - 1]) / (log_vals_interp[i] - log_vals_interp[i - 1])
             regions.append((start_f, end_f))
             in_region = False
     if in_region:
         regions.append((start_f, f_interp[-1]))
     return regions
+
 
 # ====== 绘图函数 ======
 def plot_with_regions(freqs, pL, pR, regions_L, regions_R, title, filename):
@@ -72,6 +96,7 @@ def plot_with_regions(freqs, pL, pR, regions_L, regions_R, title, filename):
     plt.show()
     print(f"✔ Plot saved: {filename}")
 
+
 # ====== 保存 CSV 为图片（带序号） ======
 def save_csv_as_image(csv_path, output_image_path):
     df = pd.read_csv(csv_path)
@@ -89,10 +114,11 @@ def save_csv_as_image(csv_path, output_image_path):
     plt.show()
     print(f"✔ Table image saved to: {output_image_path}")
 
+
 # ====== 主流程 ======
 # 1. 加载数据
-female_left, female_right = load_hrtf_fft_binaural('./female')
-male_left,   male_right   = load_hrtf_fft_binaural('./male')
+female_left, female_right = load_fft_four_directions_avg('./female')
+male_left, male_right = load_fft_four_directions_avg('./male')
 
 # 2. Welch's t-test
 tL, pL = ttest_ind(male_left, female_left, axis=0, equal_var=False)
@@ -120,10 +146,10 @@ all_R = regions_R_low + regions_R_high
 max_len = max(len(all_L), len(all_R))
 
 df = pd.DataFrame({
-    "Left Ear Start (Hz)":  [r[0] for r in all_L] + [None] * (max_len - len(all_L)),
-    "Left Ear End (Hz)":    [r[1] for r in all_L] + [None] * (max_len - len(all_L)),
+    "Left Ear Start (Hz)": [r[0] for r in all_L] + [None] * (max_len - len(all_L)),
+    "Left Ear End (Hz)": [r[1] for r in all_L] + [None] * (max_len - len(all_L)),
     "Right Ear Start (Hz)": [r[0] for r in all_R] + [None] * (max_len - len(all_R)),
-    "Right Ear End (Hz)":   [r[1] for r in all_R] + [None] * (max_len - len(all_R))
+    "Right Ear End (Hz)": [r[1] for r in all_R] + [None] * (max_len - len(all_R))
 })
 df.insert(0, "Index", pd.Series(range(1, len(df) + 1), dtype="Int64"))
 df.to_csv("pvalue_regions_fixed.csv", index=False)
