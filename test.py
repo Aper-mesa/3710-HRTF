@@ -90,7 +90,6 @@ def plot_with_regions(freqs, pL, pR, regions_L, regions_R, title, filename):
     plt.show()
     print(f"✔ Plot saved: {filename}")
 
-
 # ====== 保存 CSV 为图片（带序号） ======
 def save_csv_as_image(csv_path, output_image_path):
     df = pd.read_csv(csv_path)
@@ -108,63 +107,57 @@ def save_csv_as_image(csv_path, output_image_path):
     plt.show()
     print(f"✔ Table image saved to: {output_image_path}")
 
-
 # ====== 主流程 ======
-# 0. 设置跳过的男性样本数
-skip_counts = [0, 10, 20, 30]
+import random
+
+# 0. 配置
+repeat_times = 5
+sample_size = 11
 
 # 1. 加载女性数据
 female_left, female_right = load_fft_four_directions_avg('./female')
 n, fs = female_left.shape[1], 44100
 freqs_all = np.fft.rfftfreq(n * 2 - 1, d=1 / fs)
-low_mask = (freqs_all >= 20) & (freqs_all <= 20000)
-high_mask = freqs_all > 20000
-freqs_low, freqs_high = freqs_all[low_mask], freqs_all[high_mask]
+valid_mask = (freqs_all >= 20) & (freqs_all <= 20000)
+freqs = freqs_all[valid_mask]
 
-# 2. 多次循环：男性分别跳过前 N 个
-for skip in skip_counts:
-    print(f"=== Skip {skip} male samples ===")
-    male_left, male_right = load_fft_four_directions_avg('./male', skip=skip)
+# 2. 加载全部男性数据
+male_left_all, male_right_all = load_fft_four_directions_avg('./male')
 
-    # 3. Welch's t-test
+# 3. 多次随机抽样
+for i in range(1, repeat_times + 1):
+    print(f"=== Repeat {i}: Randomly sampling {sample_size} male subjects ===")
+    total_male = male_left_all.shape[0]
+    indices = random.sample(range(total_male), sample_size)
+    male_left = male_left_all[indices]
+    male_right = male_right_all[indices]
+
+    # 4. Welch's t-test
     tL, pL = ttest_ind(male_left, female_left, axis=0, equal_var=False)
     tR, pR = ttest_ind(male_right, female_right, axis=0, equal_var=False)
-
-    # 4. 拆分频段
-    pL_low, pR_low = pL[low_mask], pR[low_mask]
-    pL_high, pR_high = pL[high_mask], pR[high_mask]
+    pL, pR = pL[valid_mask], pR[valid_mask]
 
     # 5. 提取显著区域（左右耳）
-    regions_L_low = extract_regions_logspace(freqs_low, pL_low)
-    regions_L_high = extract_regions_logspace(freqs_high, pL_high)
-    regions_R_low = extract_regions_logspace(freqs_low, pR_low)
-    regions_R_high = extract_regions_logspace(freqs_high, pR_high)
+    regions_L = extract_regions_logspace(freqs, pL)
+    regions_R = extract_regions_logspace(freqs, pR)
 
     # 6. 保存 CSV（包含序号）
-    all_L = regions_L_low + regions_L_high
-    all_R = regions_R_low + regions_R_high
-    max_len = max(len(all_L), len(all_R))
-
+    max_len = max(len(regions_L), len(regions_R))
     df = pd.DataFrame({
-        "Left Ear Start (Hz)": [r[0] for r in all_L] + [None] * (max_len - len(all_L)),
-        "Left Ear End (Hz)": [r[1] for r in all_L] + [None] * (max_len - len(all_L)),
-        "Right Ear Start (Hz)": [r[0] for r in all_R] + [None] * (max_len - len(all_R)),
-        "Right Ear End (Hz)": [r[1] for r in all_R] + [None] * (max_len - len(all_R))
+        "Left Ear Start (Hz)": [r[0] for r in regions_L] + [None] * (max_len - len(regions_L)),
+        "Left Ear End (Hz)":   [r[1] for r in regions_L] + [None] * (max_len - len(regions_L)),
+        "Right Ear Start (Hz)": [r[0] for r in regions_R] + [None] * (max_len - len(regions_R)),
+        "Right Ear End (Hz)":   [r[1] for r in regions_R] + [None] * (max_len - len(regions_R))
     })
     df.insert(0, "Index", pd.Series(range(1, len(df) + 1), dtype="Int64"))
-    csv_name = f"pvalue_regions_skip{skip}.csv"
+    csv_name = f"pvalue_regions_repeat{i}.csv"
     df.to_csv(csv_name, index=False)
     print(f"✔ CSV saved to: {csv_name}")
 
-    # 7. 绘图
-    plot_with_regions(freqs_low, pL_low, pR_low, regions_L_low, regions_R_low,
-                      f"Welch's t-test on HRTF: Male(skip {skip}) vs Female (≤20kHz, fixed)",
-                      f"pvalue_plot_low_skip{skip}.png")
-
-    plot_with_regions(freqs_high, pL_high, pR_high, regions_L_high, regions_R_high,
-                      f"Welch's t-test on HRTF: Male(skip {skip}) vs Female (>20kHz, fixed)",
-                      f"pvalue_plot_high_skip{skip}.png")
+    # 7. 绘图（只画 20~20000Hz 范围）
+    plot_with_regions(freqs, pL, pR, regions_L, regions_R,
+                      f"Welch's t-test on HRTF: Random Male (n=11) vs Female (20-20000Hz)",
+                      f"pvalue_plot_repeat{i}.png")
 
     # 8. CSV 表格转图片
-    save_csv_as_image(csv_name, f"pvalue_regions_table_skip{skip}.png")
-
+    save_csv_as_image(csv_name, f"pvalue_regions_table_repeat{i}.png")
