@@ -5,23 +5,12 @@ import sofar as sf
 from scipy.interpolate import interp1d
 from scipy.stats import ttest_ind
 
-# ====== 读取 HRTF 并做 FFT ======
-def load_fft_four_directions_avg(directory):
+def load_fft_four_directions_avg(directory, skip=0):
     import os
-
     left_all, right_all = [], []
+    filenames = sorted([f for f in os.listdir(directory) if f.endswith(".sofa")])
 
-    # 四个目标方向：前、后、左、右
-    targets = [
-        np.array([0, 0, 1]),  # front
-        np.array([180, 0, -1]),  # back
-        np.array([-90, 0, 0]),  # left
-        np.array([90, 0, 0])  # right
-    ]
-
-    for fname in os.listdir(directory):
-        if not fname.endswith(".sofa"):
-            continue
+    for fname in filenames[skip:]:  # 跳过前 skip 个文件
         try:
             sofa = sf.read_sofa(os.path.join(directory, fname), verify=False)
             ir = sofa.Data_IR
@@ -30,7 +19,12 @@ def load_fft_four_directions_avg(directory):
             left_dir = []
             right_dir = []
 
-            for target in targets:
+            for target in [
+                np.array([0, 0, 1]),  # front
+                np.array([0, 0, -1]),  # back
+                np.array([-1, 0, 0]),  # left
+                np.array([1, 0, 0])  # right
+            ]:
                 idx = np.argmin(np.linalg.norm(pos - target, axis=1))
                 left_fft = np.abs(np.fft.rfft(ir[idx, 0, :]))
                 right_fft = np.abs(np.fft.rfft(ir[idx, 1, :]))
@@ -116,53 +110,61 @@ def save_csv_as_image(csv_path, output_image_path):
 
 
 # ====== 主流程 ======
-# 1. 加载数据
+# 0. 设置跳过的男性样本数
+skip_counts = [0, 10, 20, 30]
+
+# 1. 加载女性数据
 female_left, female_right = load_fft_four_directions_avg('./female')
-male_left, male_right = load_fft_four_directions_avg('./male')
-
-# 2. Welch's t-test
-tL, pL = ttest_ind(male_left, female_left, axis=0, equal_var=False)
-tR, pR = ttest_ind(male_right, female_right, axis=0, equal_var=False)
-
-# 3. 构建频率轴
 n, fs = female_left.shape[1], 44100
-freqs = np.fft.rfftfreq(n * 2 - 1, d=1 / fs)
-low_mask = freqs <= 20000
-high_mask = freqs > 20000
+freqs_all = np.fft.rfftfreq(n * 2 - 1, d=1 / fs)
+low_mask = (freqs_all >= 20) & (freqs_all <= 20000)
+high_mask = freqs_all > 20000
+freqs_low, freqs_high = freqs_all[low_mask], freqs_all[high_mask]
 
-freqs_low, freqs_high = freqs[low_mask], freqs[high_mask]
-pL_low, pR_low = pL[low_mask], pR[low_mask]
-pL_high, pR_high = pL[high_mask], pR[high_mask]
+# 2. 多次循环：男性分别跳过前 N 个
+for skip in skip_counts:
+    print(f"=== Skip {skip} male samples ===")
+    male_left, male_right = load_fft_four_directions_avg('./male', skip=skip)
 
-# 4. 提取显著区域（左右耳）
-regions_L_low = extract_regions_logspace(freqs_low, pL_low)
-regions_L_high = extract_regions_logspace(freqs_high, pL_high)
-regions_R_low = extract_regions_logspace(freqs_low, pR_low)
-regions_R_high = extract_regions_logspace(freqs_high, pR_high)
+    # 3. Welch's t-test
+    tL, pL = ttest_ind(male_left, female_left, axis=0, equal_var=False)
+    tR, pR = ttest_ind(male_right, female_right, axis=0, equal_var=False)
 
-# 5. 保存 CSV（包含序号）
-all_L = regions_L_low + regions_L_high
-all_R = regions_R_low + regions_R_high
-max_len = max(len(all_L), len(all_R))
+    # 4. 拆分频段
+    pL_low, pR_low = pL[low_mask], pR[low_mask]
+    pL_high, pR_high = pL[high_mask], pR[high_mask]
 
-df = pd.DataFrame({
-    "Left Ear Start (Hz)": [r[0] for r in all_L] + [None] * (max_len - len(all_L)),
-    "Left Ear End (Hz)": [r[1] for r in all_L] + [None] * (max_len - len(all_L)),
-    "Right Ear Start (Hz)": [r[0] for r in all_R] + [None] * (max_len - len(all_R)),
-    "Right Ear End (Hz)": [r[1] for r in all_R] + [None] * (max_len - len(all_R))
-})
-df.insert(0, "Index", pd.Series(range(1, len(df) + 1), dtype="Int64"))
-df.to_csv("pvalue_regions_fixed.csv", index=False)
-print("✔ CSV saved to: pvalue_regions_fixed.csv")
+    # 5. 提取显著区域（左右耳）
+    regions_L_low = extract_regions_logspace(freqs_low, pL_low)
+    regions_L_high = extract_regions_logspace(freqs_high, pL_high)
+    regions_R_low = extract_regions_logspace(freqs_low, pR_low)
+    regions_R_high = extract_regions_logspace(freqs_high, pR_high)
 
-# 6. 绘图
-plot_with_regions(freqs_low, pL_low, pR_low, regions_L_low, regions_R_low,
-                  "Welch's t-test on HRTF: Male vs Female (≤20kHz, fixed)",
-                  "pvalue_plot_low_fixed.png")
+    # 6. 保存 CSV（包含序号）
+    all_L = regions_L_low + regions_L_high
+    all_R = regions_R_low + regions_R_high
+    max_len = max(len(all_L), len(all_R))
 
-plot_with_regions(freqs_high, pL_high, pR_high, regions_L_high, regions_R_high,
-                  "Welch's t-test on HRTF: Male vs Female (>20kHz, fixed)",
-                  "pvalue_plot_high_fixed.png")
+    df = pd.DataFrame({
+        "Left Ear Start (Hz)": [r[0] for r in all_L] + [None] * (max_len - len(all_L)),
+        "Left Ear End (Hz)": [r[1] for r in all_L] + [None] * (max_len - len(all_L)),
+        "Right Ear Start (Hz)": [r[0] for r in all_R] + [None] * (max_len - len(all_R)),
+        "Right Ear End (Hz)": [r[1] for r in all_R] + [None] * (max_len - len(all_R))
+    })
+    df.insert(0, "Index", pd.Series(range(1, len(df) + 1), dtype="Int64"))
+    csv_name = f"pvalue_regions_skip{skip}.csv"
+    df.to_csv(csv_name, index=False)
+    print(f"✔ CSV saved to: {csv_name}")
 
-# 7. CSV 表格转图片
-save_csv_as_image("pvalue_regions_fixed.csv", "pvalue_regions_fixed_table.png")
+    # 7. 绘图
+    plot_with_regions(freqs_low, pL_low, pR_low, regions_L_low, regions_R_low,
+                      f"Welch's t-test on HRTF: Male(skip {skip}) vs Female (≤20kHz, fixed)",
+                      f"pvalue_plot_low_skip{skip}.png")
+
+    plot_with_regions(freqs_high, pL_high, pR_high, regions_L_high, regions_R_high,
+                      f"Welch's t-test on HRTF: Male(skip {skip}) vs Female (>20kHz, fixed)",
+                      f"pvalue_plot_high_skip{skip}.png")
+
+    # 8. CSV 表格转图片
+    save_csv_as_image(csv_name, f"pvalue_regions_table_skip{skip}.png")
+
