@@ -1,3 +1,5 @@
+import random
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -57,11 +59,11 @@ def extract_regions_logspace(freqs, p_vals, threshold=0.05, resolution=10000):
             in_region = True
         elif below[i] and not below[i - 1]:
             start_f = f_interp[i - 1] + (np.log10(threshold) - log_vals_interp[i - 1]) * (
-                        f_interp[i] - f_interp[i - 1]) / (log_vals_interp[i] - log_vals_interp[i - 1])
+                    f_interp[i] - f_interp[i - 1]) / (log_vals_interp[i] - log_vals_interp[i - 1])
             in_region = True
         elif not below[i] and below[i - 1] and in_region:
             end_f = f_interp[i - 1] + (np.log10(threshold) - log_vals_interp[i - 1]) * (
-                        f_interp[i] - f_interp[i - 1]) / (log_vals_interp[i] - log_vals_interp[i - 1])
+                    f_interp[i] - f_interp[i - 1]) / (log_vals_interp[i] - log_vals_interp[i - 1])
             regions.append((start_f, end_f))
             in_region = False
     if in_region:
@@ -90,6 +92,7 @@ def plot_with_regions(freqs, pL, pR, regions_L, regions_R, title, filename):
     plt.show()
     print(f"✔ Plot saved: {filename}")
 
+
 # ====== 保存 CSV 为图片（带序号） ======
 def save_csv_as_image(csv_path, output_image_path):
     df = pd.read_csv(csv_path)
@@ -107,11 +110,8 @@ def save_csv_as_image(csv_path, output_image_path):
     plt.show()
     print(f"✔ Table image saved to: {output_image_path}")
 
-# ====== 主流程 ======
-import random
-
-# 0. 配置
-repeat_times = 5
+# 配置
+repeat_times = 20
 sample_size = 11
 
 # 1. 加载女性数据
@@ -121,43 +121,54 @@ freqs_all = np.fft.rfftfreq(n * 2 - 1, d=1 / fs)
 valid_mask = (freqs_all >= 20) & (freqs_all <= 20000)
 freqs = freqs_all[valid_mask]
 
-# 2. 加载全部男性数据
+# 2. 加载所有男性数据
 male_left_all, male_right_all = load_fft_four_directions_avg('./male')
 
-# 3. 多次随机抽样
+# 3. 初始化显著性记录
+significance_mask_L_list = []
+significance_mask_R_list = []
+
+# 4. 多次随机抽样
 for i in range(1, repeat_times + 1):
     print(f"=== Repeat {i}: Randomly sampling {sample_size} male subjects ===")
-    total_male = male_left_all.shape[0]
-    indices = random.sample(range(total_male), sample_size)
+    indices = random.sample(range(male_left_all.shape[0]), sample_size)
     male_left = male_left_all[indices]
     male_right = male_right_all[indices]
 
-    # 4. Welch's t-test
+    # Welch's t-test
     tL, pL = ttest_ind(male_left, female_left, axis=0, equal_var=False)
     tR, pR = ttest_ind(male_right, female_right, axis=0, equal_var=False)
     pL, pR = pL[valid_mask], pR[valid_mask]
 
-    # 5. 提取显著区域（左右耳）
+    # 记录显著掩码
+    significance_mask_L_list.append((pL < 0.05).astype(int))
+    significance_mask_R_list.append((pR < 0.05).astype(int))
+
+    # 提取显著区域
     regions_L = extract_regions_logspace(freqs, pL)
     regions_R = extract_regions_logspace(freqs, pR)
 
-    # 6. 保存 CSV（包含序号）
-    max_len = max(len(regions_L), len(regions_R))
-    df = pd.DataFrame({
-        "Left Ear Start (Hz)": [r[0] for r in regions_L] + [None] * (max_len - len(regions_L)),
-        "Left Ear End (Hz)":   [r[1] for r in regions_L] + [None] * (max_len - len(regions_L)),
-        "Right Ear Start (Hz)": [r[0] for r in regions_R] + [None] * (max_len - len(regions_R)),
-        "Right Ear End (Hz)":   [r[1] for r in regions_R] + [None] * (max_len - len(regions_R))
-    })
-    df.insert(0, "Index", pd.Series(range(1, len(df) + 1), dtype="Int64"))
-    csv_name = f"pvalue_regions_repeat{i}.csv"
-    df.to_csv(csv_name, index=False)
-    print(f"✔ CSV saved to: {csv_name}")
-
-    # 7. 绘图（只画 20~20000Hz 范围）
+    # 仅绘制频率图
     plot_with_regions(freqs, pL, pR, regions_L, regions_R,
                       f"Welch's t-test on HRTF: Random Male (n=11) vs Female (20-20000Hz)",
                       f"pvalue_plot_repeat{i}.png")
 
-    # 8. CSV 表格转图片
-    save_csv_as_image(csv_name, f"pvalue_regions_table_repeat{i}.png")
+# 5. 统计每个频率点显著出现的比例
+sig_L_array = np.array(significance_mask_L_list)
+sig_R_array = np.array(significance_mask_R_list)
+ratio_L = sig_L_array.mean(axis=0)
+ratio_R = sig_R_array.mean(axis=0)
+
+# 6. 绘制显著比例图
+plt.figure(figsize=(12, 6))
+plt.plot(freqs, ratio_L, label='Left Ear (p < 0.05)', color='blue')
+plt.plot(freqs, ratio_R, label='Right Ear (p < 0.05)', color='orange')
+plt.axhline(0.8, color='red', linestyle='--', label='80% Stability Threshold')
+plt.xlabel('Frequency (Hz)')
+plt.ylabel('Proportion of Significance')
+plt.title('Stable Significance Frequency Proportion (Repeated t-tests)')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("stable_significance_proportion.png")
+plt.show()
