@@ -21,9 +21,9 @@ def load_fft_four_directions_avg(directory, skip=0):
 
             for target in [
                 np.array([0, 0, 1]),  # front
-                np.array([0, 0, -1]),  # back
-                np.array([-1, 0, 0]),  # left
-                np.array([1, 0, 0])  # right
+                np.array([180, 0, -1]),  # back
+                np.array([-90, 0, 0]),  # left
+                np.array([90, 0, 0])  # right
             ]:
                 idx = np.argmin(np.linalg.norm(pos - target, axis=1))
                 left_fft = np.abs(np.fft.rfft(ir[idx, 0, :]))
