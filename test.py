@@ -12,22 +12,38 @@ def load_fft_four_directions_avg(directory, skip=0):
     left_all, right_all = [], []
     filenames = sorted([f for f in os.listdir(directory) if f.endswith(".sofa")])
 
-    for fname in filenames[skip:]:  # 跳过前 skip 个文件
+    # 定义4个方向（球坐标）：azimuth, elevation, distance
+    spherical_dirs = [
+        [0, 0, 1],     # front
+        [180, 0, 1],   # back
+        [-90, 0, 1],   # left
+        [90, 0, 1]     # right
+    ]
+
+    def sph2cart(az_deg, el_deg, r=1):
+        az = np.deg2rad(az_deg)
+        el = np.deg2rad(el_deg)
+        x = r * np.cos(el) * np.cos(az)
+        y = r * np.cos(el) * np.sin(az)
+        z = r * np.sin(el)
+        return np.array([x, y, z])
+
+    cartesian_dirs = [sph2cart(*sph) for sph in spherical_dirs]
+
+    for fname in filenames[skip:]:
         try:
             sofa = sf.read_sofa(os.path.join(directory, fname), verify=False)
             ir = sofa.Data_IR
-            pos = sofa.SourcePosition
+            pos = sofa.SourcePosition  # (M, 3)，默认单位 degree, degree, meter
+
+            # 将 pos 从球坐标转换为笛卡尔坐标
+            pos_cart = np.array([sph2cart(*p) for p in pos])
 
             left_dir = []
             right_dir = []
 
-            for target in [
-                np.array([0, 0, 1]),  # front
-                np.array([180, 0, 1]),  # back
-                np.array([-90, 0, 1]),  # left
-                np.array([90, 0, 1])  # right
-            ]:
-                idx = np.argmin(np.linalg.norm(pos - target, axis=1))
+            for target in cartesian_dirs:
+                idx = np.argmin(np.linalg.norm(pos_cart - target, axis=1))
                 left_fft = np.abs(np.fft.rfft(ir[idx, 0, :]))
                 right_fft = np.abs(np.fft.rfft(ir[idx, 1, :]))
                 left_dir.append(left_fft)
@@ -40,7 +56,6 @@ def load_fft_four_directions_avg(directory, skip=0):
             print(f"Error reading {fname}: {e}")
 
     return np.array(left_all), np.array(right_all)
-
 
 # ====== 提取显著区域（p < 0.05，log空间插值）======
 def extract_regions_logspace(freqs, p_vals, threshold=0.05, resolution=10000):
